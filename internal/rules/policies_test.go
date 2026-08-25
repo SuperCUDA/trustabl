@@ -1578,6 +1578,94 @@ def fetch() -> str:
 `,
 		toolConfig: nil, wantFires: false},
 
+	// ─── OAI-025 privileged tool without error handling (NEW) ────────────────
+	{name: "OAI-025 fires on subprocess without try/except", ruleID: "OAI-025", kind: models.KindOpenAITool, src: `
+import subprocess
+def run(cmd: str) -> str:
+    """Run."""
+    return subprocess.run([cmd], capture_output=True).stdout.decode()
+`,
+		toolConfig: nil, wantFires: true},
+	{name: "OAI-025 silent when wrapped in try/except", ruleID: "OAI-025", kind: models.KindOpenAITool, src: `
+import subprocess
+def run(cmd: str) -> str:
+    """Run."""
+    try:
+        return subprocess.run([cmd], capture_output=True).stdout.decode()
+    except Exception:
+        return "error"
+`,
+		toolConfig: nil, wantFires: false},
+
+	// ─── OAI-026 exact-named mutation without idempotency key (NEW) ──────────
+	{name: "OAI-026 fires on refund with no key", ruleID: "OAI-026", kind: models.KindOpenAITool, src: `
+def refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"ok": True}
+`,
+		toolConfig: nil, wantFires: true},
+	{name: "OAI-026 silent with idempotency key", ruleID: "OAI-026", kind: models.KindOpenAITool, src: `
+def refund(order_id: str, amount: float, idempotency_key: str) -> dict:
+    """Refund an order."""
+    return {"ok": True}
+`,
+		toolConfig: nil, wantFires: false},
+
+	// ─── OAI-027 network-egress tool without needs_approval (NEW) ────────────
+	{name: "OAI-027 fires on dynamic-URL fetch with no approval", ruleID: "OAI-027", kind: models.KindOpenAITool, src: `
+import httpx
+def fetch(host: str) -> str:
+    """Fetch."""
+    return httpx.get(f"https://{host}/data", timeout=10).text
+`,
+		toolConfig: nil, wantFires: true},
+	{name: "OAI-027 silent when needs_approval is set", ruleID: "OAI-027", kind: models.KindOpenAITool, src: `
+import httpx
+def fetch(host: str) -> str:
+    """Fetch."""
+    return httpx.get(f"https://{host}/data", timeout=10).text
+`,
+		toolConfig: map[string]string{"needs_approval": "True"}, wantFires: false},
+
+	// ─── OAI-028 TypeScript tool spawns a subprocess (NEW) ───────────────────
+	{
+		name: "OAI-028 fires on TS child_process", ruleID: "OAI-028",
+		kind: models.KindOpenAITool, lang: models.LanguageTypeScript, wantFires: true,
+		src: "import { tool } from \"@openai/agents\";\n" +
+			"import { execSync } from \"child_process\";\n" +
+			"export const t = tool({ name: \"run\", description: \"run\", parameters: {}, execute: async (a) => {\n" +
+			"  return execSync(a.cmd).toString();\n" +
+			"} });\n",
+	},
+	{
+		name: "OAI-028 silent without TS shell", ruleID: "OAI-028",
+		kind: models.KindOpenAITool, lang: models.LanguageTypeScript, wantFires: false,
+		src: "import { tool } from \"@openai/agents\";\n" +
+			"export const t = tool({ name: \"run\", description: \"run\", parameters: {}, execute: async () => {\n" +
+			"  return 42;\n" +
+			"} });\n",
+	},
+
+	// ─── OAI-029 aiohttp session write without timeout (NEW) ─────────────────
+	{name: "OAI-029 fires on aiohttp put without timeout", ruleID: "OAI-029", kind: models.KindOpenAITool, src: `
+import aiohttp
+async def push(url: str, body: dict) -> int:
+    """Push."""
+    async with aiohttp.ClientSession() as s:
+        async with s.put(url, json=body) as r:
+            return r.status
+`,
+		toolConfig: nil, wantFires: true},
+	{name: "OAI-029 silent with timeout", ruleID: "OAI-029", kind: models.KindOpenAITool, src: `
+import aiohttp
+async def push(url: str, body: dict) -> int:
+    """Push."""
+    async with aiohttp.ClientSession() as s:
+        async with s.put(url, json=body, timeout=aiohttp.ClientTimeout(total=10)) as r:
+            return r.status
+`,
+		toolConfig: nil, wantFires: false},
+
 	// ─── CSDK-008 (team rule): **kwargs without explicit input_schema ────────
 	// FunctionParams surfaces the **kwargs splat name, so the rule fires on a
 	// real **kwargs signature (not only a plain param literally named kwargs).
@@ -2074,6 +2162,32 @@ var policyRepoRuleCases = []policyRepoCase{
 		models.RepoInventory{
 			SDKsDetected:       []models.SDK{models.SDKOpenAIAgents},
 			UsesDefaultTracing: true,
+		},
+		false},
+
+	// ─── OAI-203 default tracing + no agent-guidance doc (NEW) ───────────────
+	{"OAI-203 fires when default tracing and no guidance doc", "OAI-203",
+		models.RepoProfile{Languages: []models.Language{models.LanguagePython}},
+		models.RepoInventory{
+			SDKsDetected:       []models.SDK{models.SDKOpenAIAgents},
+			UsesDefaultTracing: true,
+		},
+		true},
+	{"OAI-203 silent when AGENTS.md present", "OAI-203",
+		models.RepoProfile{
+			Languages: []models.Language{models.LanguagePython},
+			Manifest:  models.ScanManifest{Components: []models.AgentComponent{{Kind: models.ComponentAgentsMd}}},
+		},
+		models.RepoInventory{
+			SDKsDetected:       []models.SDK{models.SDKOpenAIAgents},
+			UsesDefaultTracing: true,
+		},
+		false},
+	{"OAI-203 silent when tracing is disabled", "OAI-203",
+		models.RepoProfile{Languages: []models.Language{models.LanguagePython}},
+		models.RepoInventory{
+			SDKsDetected:       []models.SDK{models.SDKOpenAIAgents},
+			UsesDefaultTracing: false,
 		},
 		false},
 
